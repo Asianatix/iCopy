@@ -1,15 +1,4 @@
-import os, re, time
-import logging, chardet
-from functools import wraps
-from datetime import date
-from subprocess import Popen, PIPE
-from telegram import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardRemove,
-    ReplyKeyboardMarkup,
-    Message,
-)
+import time, logging, re, chardet
 from telegram.ext import (
     Updater,
     CommandHandler,
@@ -18,19 +7,55 @@ from telegram.ext import (
     CallbackQueryHandler,
     ConversationHandler,
 )
-from threading import Timer
-
+from telegram.ext.dispatcher import run_async
+import utils
+from utils import (
+    folder_name,
+    sendmsg,
+    restricted,
+    menu_keyboard,
+    run,
+    start_message,
+    help_message,
+    mode_message,
+    task_message,
+    cplt_message,
+    pros_message,
+    cron_task,
+    killmission,
+    kill_message,
+    Mission_Done,
+    Mission_kill,
+)
+from drive import drive_get
+from threading import Timer, Thread
 import settings
 from process_bar import status
 
-# Latest Modified DateTime : 202006140110
+
+# ############################## Program Description ##############################
+# Latest Modified DateTime : 202006220250 ,
+# Version = '0.1.3-beta.2',
+# Author : 'FxxkrLab',
+# Website: 'https://bbs.jsu.net/c/official-project/icopy/6',
+# Code_URL : 'https://github.com/fxxkrlab/iCopy',
+# Description= 'Copy GoogleDrive Resources via Telegram BOT',
+# Programming Language : Python3',
+# License : MIT License',
+# Operating System : Linux',
+# ############################## Program Description.END ###########################
+
+
+# ############################## logging ##############################
 
 # Logging.basicConfig()
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,  # level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+
+# ############################## Global ##############################
 
 # Conversation Stats
 CHOOSE_MODE, LINK_REPLY, TARGET_REPLY = range(3)
@@ -38,45 +63,73 @@ CHOOSE_MODE, LINK_REPLY, TARGET_REPLY = range(3)
 # Regex
 regex = r"[-\w]{11,}"
 
-# GetAuth from setting.ENABLED_USERS Telegram User ID
-def restricted(func):
-    @wraps(func)
-    def wrapped(update, context, *args, **kwargs):
-        user_id = update.effective_user.id
-        if user_id not in settings.ENABLED_USERS:
-            print(f"Unauthorized access denied for {user_id}.")
-            update.message.reply_text(
-                "Hi {} 您好".format(update.message.from_user.first_name)
-            )
-            update.message.reply_text(
-                "您的用户ID:{} 未经授权\n请联系管理员".format(update.message.from_user.id)
-            )
-            return
-        return func(update, context, *args, **kwargs)
 
-    return wrapped
-
+# ############################## Command ##############################
 
 # START INFO & InlineKeyboard with Callback_query.data
 @restricted
 def start(update, context):
-    keyboard = [
-        [
-            InlineKeyboardButton("极速转存", callback_data="quick"),
-            InlineKeyboardButton("自定义模式", callback_data="copy"),
-        ],
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     update.effective_message.reply_text(
-        "Hi! {} 欢迎使用 iCopy\n"
-        "Fxxkr LAB 出品必属极品\n"
-        "请选择 Google Drive 模式转存模式".format(update.effective_user.first_name),
-        reply_markup=reply_markup,
+        start_message().format(update.effective_user.first_name),
+        reply_markup=menu_keyboard(),
     )
 
     return CHOOSE_MODE
+
+
+# HELP 帮助命令提示引导
+@restricted
+def help(update, context):
+    update.effective_message.reply_text(help_message())
+
+
+# ############################## Run_Modes ##############################
+
+# QUICK Mode ,set mode = quick
+@restricted
+def quick(update, context):
+    global mode
+    mode = "quick"
+    call_mode = update.effective_message.text
+
+    if "/quick" == call_mode.strip()[:6]:
+        update.effective_message.reply_text(
+            mode_message().format(update.effective_user.first_name, "┋极速转存┋")
+        )
+
+        return request_link(update, context)
+
+    if update.callback_query.data == "quick":
+        update.callback_query.edit_message_text(
+            mode_message().format(update.effective_user.first_name, "┋极速转存┋")
+        )
+
+        return request_link(update, context)
+
+
+# COPY Mode ,set mode = copy
+@restricted
+def copy(update, context):
+    global mode
+    mode = "copy"
+    call_mode = update.effective_message.text
+
+    if "/copy" == call_mode.strip()[:5]:
+        update.effective_message.reply_text(
+            mode_message().format(update.effective_user.first_name, "┋自定义目录┋")
+        )
+
+        return request_link(update, context)
+
+    if update.callback_query.data == "copy":
+        update.callback_query.edit_message_text(
+            mode_message().format(update.effective_user.first_name, "┋自定义目录┋")
+        )
+
+        return request_link(update, context)
+
+
+# ############################## Run_Modes.END ##############################
 
 
 # Error module
@@ -85,43 +138,27 @@ def error(update, context):
     logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 
-# HELP 帮助命令提示引导
-@restricted
-def help(update, context):
+# cancel function
+
+
+def cancel(update, context):
+    user = update.message.from_user
+    logger.info("User %s canceled the conversation.", user.first_name)
     update.message.reply_text(
-        "/help - 查询使用命令 \n"
-        "/quick Google Drive 极速转存 \n"
-        "/copy 自定义目录转存 \n"
-        "/pre1 预设转存目录1(未制作) \n"
-        "/pre2 预设转存目录2(未制作) \n"
-        "/backup 预设备份目录1(未制作) \n"
-        "/dir 获取预设目录文件(未制作) \n"
+        "Bye! {} , 欢迎再次使用 iCopy".format(update.message.from_user.first_name)
     )
+    return ConversationHandler.END
 
 
-# QUICK Mode ,set mode = quick
-@restricted
-def quick(update, context):
-    update.effective_message.reply_text(
-        "您好 {} , 本次转存任务您选择了\n┋极速转存┋模式 ".format(update.effective_user.first_name)
-    )
-    global mode
-    mode = "quick"
-
-    return request_link(update, context)
+# kill function
 
 
-# COPY Mode ,set mode = copy
-@restricted
-def copy(update, context):
-    update.effective_message.reply_text(
-        "您好 {} , 本次转存任务您选择了\n┋自定义目录┋模式 ".format(update.effective_user.first_name)
-    )
-    global mode
-    mode = "copy"
+def kill(update, context):
+    Thread(target=killmission).start()
+    return cancel(update, context)
 
-    return request_link(update, context)
 
+# ################################ Service #################################
 
 # Request GoogleDrive Shared_Link
 def request_link(update, context):
@@ -135,8 +172,11 @@ def request_target(update, context):
     global mode
     global link
     link = update.effective_message.text
+    if "/cancel" == link.strip()[:7]:
+        return cancel(update, context)
 
     if "quick" == mode:
+
         return recived_mission(update, context)
 
     if "copy" == mode:
@@ -151,61 +191,46 @@ def recived_mission(update, context):
     global link
     global target
     target = update.effective_message.text
+    if "/cancel" == target.strip()[:7]:
+        return cancel(update, context)
 
-# extract lid,tid from Link(shared & Target)
+    # extract lid,tid from Link(shared & Target)
     lid = "".join(re.findall(regex, link))
     tid = "".join(re.findall(regex, target))
 
-# extract Shared_Link folderName
-    foldername = (
-        os.popen(
-            """gclone lsf {}:{{{}}} --dump bodies -vv 2>&1 | grep '"{}","name"' | cut -d '"' -f 8""".format(
-                settings.Remote, lid, lid
-            )
-        )
-        .read()
-        .rstrip()
-    )
+    # extract Shared_Link folderName
+    if len(lid) == 28 or len(lid) == 33:
+        foldername = folder_name(settings.Remote, lid, lid)
+    elif len(lid) != 28 and len(lid) != 33:
+        d_id = lid
+        foldername = drive_get(d_id)
 
-# get Target_folderName under quick mode
+    # get Target_folderName under quick mode
     if "quick" == mode:
-        target_folder = (
-            os.popen(
-                """gclone lsf {}:{{{}}} --dump bodies -vv 2>&1 | grep '"{}","name"' | cut -d '"' -f 8""".format(
-                    settings.Remote, settings.Pre_Dst_id, settings.Pre_Dst_id
-                )
-            )
-            .read()
-            .rstrip()
-        )
-# tid = Pre_Dst_id under quick mode
+        # tid = Pre_Dst_id under quick mode
         tid = settings.Pre_Dst_id
+        if len(tid) == 28 or len(tid) == 33:
+            target_folder = folder_name(settings.Remote, tid, tid)
+        elif len(tid) != 28 and len(tid) != 33:
+            d_id = tid
+            target_folder = drive_get(d_id)
 
-# get Target_folderName under copy mode
+    # get Target_folderName under copy mode
     elif "copy" == mode:
-        target_folder = (
-            os.popen(
-                """gclone lsf {}:{{{}}} --dump bodies -vv 2>&1 | grep '"{}","name"' | cut -d '"' -f 8""".format(
-                    settings.Remote, tid, tid
-                )
-            )
-            .read()
-            .rstrip()
-        )
+        if len(tid) == 28 or len(tid) == 33:
+            target_folder = folder_name(settings.Remote, tid, tid)
+        elif len(tid) != 28 and len(tid) != 33:
+            d_id = tid
+            target_folder = drive_get(d_id)
 
-# sendmsg Mission.INFO
+    # sendmsg Mission.INFO
     update.effective_message.reply_text(
-        "▣▣▣▣▣▣▣▣任务信息▣▣▣▣▣▣▣▣\n"
-        "┋资源名称┋:\n"
-        "┋•{} \n"
-        "┋资源地址┋:\n"
-        "┋•{} \n"
-        "┋转入位置┋:\n"
-        "┋•{}/{}".format(foldername, lid, target_folder, foldername)
+        task_message().format(foldername, lid, target_folder, foldername)
     )
 
-# Build Mission Command
-    command = """gclone copy {}:{{{}}} {}:{{{}}}/"{}" {} {}""".format(
+    # Build Mission Command
+    global command
+    commandstr = """gclonejsusplitcopyjsusplit{}:{{{}}}jsusplit{}:{{{}}}/{}jsusplit{}jsusplit{}""".format(
         settings.Remote,
         lid,
         settings.Remote,
@@ -214,18 +239,15 @@ def recived_mission(update, context):
         settings.Run_Mode,
         settings.TRANSFER,
     )
-    copyprocess(update, context, command)
 
-    return ConversationHandler.END
+    command = commandstr.split("jsusplit")
+    print(command)
 
-
-# BOT 界面信息滚动更新模块
-def sendmsg(bot, chat_id, mid, context):
-
-    bot.edit_message_text(chat_id=chat_id, message_id=mid, text=context)
+    return ConversationHandler.END, copyprocess(update, context, command)
 
 
 # 任务信息读取处理，并通过异步进程发送 BOT 界面滚动更新信息
+@run_async
 def copyprocess(update, context, command):
     bot = context.bot
     message = update.effective_message.reply_text("转存任务准备中...")
@@ -237,6 +259,7 @@ def copyprocess(update, context, command):
     prog = ""
     timeout = 0.1
     xtime = 0
+
     for toutput in run(command):
         print(toutput.decode("utf-8", "ignore"))
         y = re.findall("^Transferred:", toutput.decode("utf-8", "ignore"))
@@ -257,63 +280,53 @@ def copyprocess(update, context, command):
 
         if working1 != working or percent1 != percent:
             if int(time.time()) - xtime > timeout:
-                Timer(
-                    0,
+                cron_task(
                     sendmsg,
-                    args=(
-                        bot,
-                        message.chat_id,
-                        mid,
-                        "▣▣▣▣▣▣▣正在执行转存▣▣▣▣▣▣▣ \n {} \n {} \n {} \n ".format(
-                            percent, prog, working
-                        ),
-                    ),
-                ).start()
+                    bot,
+                    message.chat_id,
+                    mid,
+                    pros_message(),
+                    percent,
+                    prog,
+                    working,
+                )
                 percent1 = percent
                 working1 = working
                 xtime = time.time()
 
-        if statu != " -" and working1 == working:
-            waitime = int(time.time())
-            if waitime - int(timeout) > 5 and int(statu) > int(0):
-                percent = "100%"
-                prog = status(100)
-                Timer(
-                    0,
-                    sendmsg,
-                    args=(
-                        bot,
-                        message.chat_id,
-                        mid,
-                        "▣▣▣▣▣▣▣转存任务完成▣▣▣▣▣▣▣ \n {} \n {} \n"
-                        "本次转存任务已完成 \n"
-                        "跳转至开始(START)命令 \n".format(percent, prog),
-                    ),
-                ).start()
+    # Fix Mission INFO
+    if utils.Mission_Done == "finished":
+        if utils.Mission_kill != "killed":
+            percent = "100%"
+            prog = status(100)
+            cron_task(
+                sendmsg, bot, message.chat_id, mid, cplt_message(), percent, prog, ""
+            )
+            utils.Mission_Done = ""
 
-                return start(update, context)
+            return help(update, context)
+
+        elif utils.Mission_kill == "killed":
+            percent = "0%"
+            prog = status(0)
+            working = "本次转存任务已取消"
+            cron_task(
+                sendmsg,
+                bot,
+                message.chat_id,
+                mid,
+                kill_message(),
+                percent,
+                prog,
+                working,
+            )
+            utils.Mission_Done = ""
+            utils.Mission_kill = ""
+
+            return help(update, context)
 
 
-# run(command) subprocess.popen --> line --> stdout
-def run(command):
-    process = Popen(command, stdout=PIPE, shell=True)
-    while True:
-        line = process.stdout.readline().rstrip()
-        if not line:
-            break
-        yield line
-
-# cancel function
-"""
-def cancel(update, context):
-    user = update.message.from_user
-    logger.info("User %s canceled the conversation.", user.first_name)
-    update.message.reply_text(
-        "Bye! {} , 欢迎再次使用 iCopy".format(update.message.from_user.first_name)
-    )
-
-    return ConversationHandler.END
-"""
+# ############################### Main ####################################
 
 
 def main():
@@ -321,7 +334,7 @@ def main():
 
     dp = updater.dispatcher
 
-# Entry Conversation
+    # Entry Conversation
     conv_handler = ConversationHandler(
         entry_points=[
             # Entry Points
@@ -346,10 +359,12 @@ def main():
                 MessageHandler(Filters.text, recived_mission),
             ],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("cancel", cancel),],
     )
 
-    dp.add_handler(conv_handler)
+    dp.add_handler(CommandHandler("kill", kill), 1)
+
+    dp.add_handler(conv_handler, 2)
 
     dp.add_handler(CommandHandler("help", help))
 
